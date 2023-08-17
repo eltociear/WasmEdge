@@ -89,6 +89,13 @@ Expect<void> Executor::runBrTableOp(Runtime::StackManager &StackMgr,
                        LabelTable[LabelTableSize].PCOffset, PC);
 }
 
+Expect<void> Executor::runBrCastOp(Runtime::StackManager &,
+                                   const AST::Instruction &,
+                                   AST::InstrView::iterator &, bool,
+                                   bool) noexcept {
+  return {};
+}
+
 Expect<void> Executor::runReturnOp(Runtime::StackManager &StackMgr,
                                    AST::InstrView::iterator &PC) noexcept {
   // Check stop token
@@ -105,8 +112,7 @@ Expect<void> Executor::runCallOp(Runtime::StackManager &StackMgr,
                                  AST::InstrView::iterator &PC,
                                  bool IsTailCall) noexcept {
   // Get Function address.
-  const auto *ModInst = StackMgr.getModule();
-  const auto *FuncInst = *ModInst->getFunc(Instr.getTargetIndex());
+  const auto *FuncInst = getFuncInstByIdx(StackMgr, Instr.getTargetIndex());
   if (auto Res = enterFunction(StackMgr, *FuncInst, PC + 1, IsTailCall); !Res) {
     return Unexpect(Res);
   } else {
@@ -147,7 +153,7 @@ Expect<void> Executor::runCallIndirectOp(Runtime::StackManager &StackMgr,
 
   // Get function type at index x.
   const auto *ModInst = StackMgr.getModule();
-  const auto *TargetFuncType = *ModInst->getFuncType(Instr.getTargetIndex());
+  const auto &ExpDefType = **ModInst->getType(Instr.getTargetIndex());
 
   // Pop the value i32.const i from the Stack.
   uint32_t Idx = StackMgr.pop().get<uint32_t>();
@@ -173,18 +179,19 @@ Expect<void> Executor::runCallIndirectOp(Runtime::StackManager &StackMgr,
 
   // Check function type.
   const auto *FuncInst = retrieveFuncRef(Ref);
-  const auto &FuncType = FuncInst->getFuncType();
-  if (!matchTypes(*ModInst, TargetFuncType->getParamTypes(),
-                  *FuncInst->getModule(), FuncType.getParamTypes()) ||
-      !matchTypes(*ModInst, TargetFuncType->getReturnTypes(),
-                  *FuncInst->getModule(), FuncType.getReturnTypes())) {
+  const auto &GotDefType = FuncInst->getDefType();
+  if (!AST::TypeMatcher::matchType(
+          ModInst->getTypeList(), *ExpDefType.getTypeIndex(),
+          FuncInst->getModule()->getTypeList(), *GotDefType.getTypeIndex())) {
+    auto &ExpFuncType = ExpDefType.getCompositeType().getFuncType();
+    auto &GotFuncType = GotDefType.getCompositeType().getFuncType();
     spdlog::error(ErrCode::Value::IndirectCallTypeMismatch);
     spdlog::error(ErrInfo::InfoInstruction(Instr.getOpCode(), Instr.getOffset(),
                                            {Idx},
                                            {ValTypeFromType<uint32_t>()}));
     spdlog::error(ErrInfo::InfoMismatch(
-        TargetFuncType->getParamTypes(), TargetFuncType->getReturnTypes(),
-        FuncType.getParamTypes(), FuncType.getReturnTypes()));
+        ExpFuncType.getParamTypes(), ExpFuncType.getReturnTypes(),
+        GotFuncType.getParamTypes(), GotFuncType.getReturnTypes()));
     return Unexpect(ErrCode::Value::IndirectCallTypeMismatch);
   }
 

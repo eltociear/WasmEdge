@@ -91,6 +91,7 @@ public:
   void addHostFunc(std::string_view Name,
                    std::unique_ptr<HostFunctionBase> &&Func) {
     std::unique_lock Lock(Mutex);
+    unsafeAddDefinedType(Func->moveDefType());
     unsafeAddHostInstance(Name, OwnedFuncInsts, FuncInsts, ExpFuncs,
                           std::make_unique<Runtime::Instance::FunctionInstance>(
                               this, std::move(Func)));
@@ -98,7 +99,9 @@ public:
   void addHostFunc(std::string_view Name,
                    std::unique_ptr<Instance::FunctionInstance> &&Func) {
     std::unique_lock Lock(Mutex);
+    assuming(Func->isHostFunction());
     Func->setModule(this);
+    unsafeAddDefinedType(Func->getHostFunc().moveDefType());
     unsafeAddHostInstance(Name, OwnedFuncInsts, FuncInsts, ExpFuncs,
                           std::move(Func));
   }
@@ -183,10 +186,15 @@ protected:
   friend class Executor::Executor;
   friend class Runtime::CallingFrame;
 
-  /// Copy the function types in type section to this module instance.
-  void addFuncType(const AST::FunctionType &FuncType) {
+  /// Create and copy the defined type to this module instance.
+  void addDefinedType(const AST::SubType &SType) {
     std::unique_lock Lock(Mutex);
-    FuncTypes.emplace_back(FuncType);
+    unsafeAddDefinedType(std::make_unique<AST::SubType>(SType));
+  }
+  void unsafeAddDefinedType(std::unique_ptr<AST::SubType> &&SType) {
+    OwnedTypes.push_back(std::move(SType));
+    OwnedTypes.back()->setTypeIndex(Types.size());
+    Types.push_back(OwnedTypes.back().get());
   }
 
   /// Create and add instances into this module instance.
@@ -253,17 +261,21 @@ protected:
     ExpGlobals.insert_or_assign(std::string(Name), GlobInsts[Idx]);
   }
 
-  /// Get function type by index.
-  Expect<const AST::FunctionType *> getFuncType(uint32_t Idx) const noexcept {
+  /// Get defined type list.
+  Span<const AST::SubType *const> getTypeList() const noexcept { return Types; }
+
+  /// Get instance pointer by index.
+  Expect<const AST::SubType *> getType(uint32_t Idx) const noexcept {
     std::shared_lock Lock(Mutex);
-    if (unlikely(Idx >= FuncTypes.size())) {
+    if (unlikely(Idx >= Types.size())) {
       // Error logging need to be handled in caller.
       return Unexpect(ErrCode::Value::WrongInstanceIndex);
     }
-    return &FuncTypes[Idx];
+    return unsafeGetType(Idx);
   }
-
-  /// Get instance pointer by index.
+  const AST::SubType *unsafeGetType(uint32_t Idx) const noexcept {
+    return Types[Idx];
+  }
   Expect<FunctionInstance *> getFunc(uint32_t Idx) const noexcept {
     std::shared_lock Lock(Mutex);
     if (Idx >= FuncInsts.size()) {
@@ -429,8 +441,9 @@ protected:
   /// Module name.
   const std::string ModName;
 
-  /// Function types.
-  std::vector<AST::FunctionType> FuncTypes;
+  /// Defined types.
+  std::vector<AST::SubType *> Types;
+  std::vector<std::unique_ptr<AST::SubType>> OwnedTypes;
 
   /// Owned instances in this module.
   std::vector<std::unique_ptr<Instance::FunctionInstance>> OwnedFuncInsts;

@@ -27,16 +27,16 @@ Expect<void> Executor::instantiate(Runtime::Instance::ModuleInstance &ModInst,
   // and dispatch it into different cases to reduce branch misses.
   if (CodeSegs[0].getSymbol() != false) {
     for (uint32_t I = 0; I < CodeSegs.size(); ++I) {
-      auto *FuncType = *ModInst.getFuncType(TypeIdxs[I]);
+      auto *SubType = *ModInst.getType(TypeIdxs[I]);
       auto Symbol = CodeSegs[I].getSymbol();
-      ModInst.addFunc(*FuncType, std::move(Symbol));
+      ModInst.addFunc(*SubType, std::move(Symbol));
     }
   } else {
     // Iterate through the code segments to instantiate function instances.
     for (uint32_t I = 0; I < CodeSegs.size(); ++I) {
       // Create and add the function instance into the module instance.
-      auto *FuncType = *ModInst.getFuncType(TypeIdxs[I]);
-      ModInst.addFunc(*FuncType, CodeSegs[I].getLocals(),
+      auto *SubType = *ModInst.getType(TypeIdxs[I]);
+      ModInst.addFunc(*SubType, CodeSegs[I].getLocals(),
                       CodeSegs[I].getExpr().getInstrs());
     }
   }

@@ -35,25 +35,32 @@ public:
   FunctionInstance() = delete;
   /// Move constructor.
   FunctionInstance(FunctionInstance &&Inst) noexcept
-      : ModInst(Inst.ModInst), FuncType(Inst.FuncType),
-        Data(std::move(Inst.Data)) {}
+      : ModInst(Inst.ModInst), SType(Inst.SType), Data(std::move(Inst.Data)) {
+    assuming(SType.getCompositeType().isFunc());
+  }
   /// Constructor for native function.
-  FunctionInstance(const ModuleInstance *Mod, const AST::FunctionType &Type,
+  FunctionInstance(const ModuleInstance *Mod, const AST::SubType &Type,
                    Span<const std::pair<uint32_t, ValType>> Locs,
                    AST::InstrView Expr) noexcept
-      : ModInst(Mod), FuncType(Type),
-        Data(std::in_place_type_t<WasmFunction>(), Locs, Expr) {}
+      : ModInst(Mod), SType(Type),
+        Data(std::in_place_type_t<WasmFunction>(), Locs, Expr) {
+    assuming(SType.getCompositeType().isFunc());
+  }
   /// Constructor for compiled function.
-  FunctionInstance(const ModuleInstance *Mod, const AST::FunctionType &Type,
+  FunctionInstance(const ModuleInstance *Mod, const AST::SubType &Type,
                    Symbol<CompiledFunction> S) noexcept
-      : ModInst(Mod), FuncType(Type),
-        Data(std::in_place_type_t<Symbol<CompiledFunction>>(), std::move(S)) {}
+      : ModInst(Mod), SType(Type),
+        Data(std::in_place_type_t<Symbol<CompiledFunction>>(), std::move(S)) {
+    assuming(SType.getCompositeType().isFunc());
+  }
   /// Constructor for host function.
   FunctionInstance(const ModuleInstance *Mod,
                    std::unique_ptr<HostFunctionBase> &&Func) noexcept
-      : ModInst(Mod), FuncType(Func->getFuncType()),
+      : ModInst(Mod), SType(Func->getDefType()),
         Data(std::in_place_type_t<std::unique_ptr<HostFunctionBase>>(),
-             std::move(Func)) {}
+             std::move(Func)) {
+    assuming(SType.getCompositeType().isFunc());
+  }
 
   /// Getter of checking is native wasm function.
   bool isWasmFunction() const noexcept {
@@ -74,7 +81,12 @@ public:
   const ModuleInstance *getModule() const noexcept { return ModInst; }
 
   /// Getter of function type.
-  const AST::FunctionType &getFuncType() const noexcept { return FuncType; }
+  const AST::FunctionType &getFuncType() const noexcept {
+    return SType.getCompositeType().getFuncType();
+  }
+
+  /// Getter of defined type.
+  const AST::SubType &getDefType() const noexcept { return SType; }
 
   /// Getter of function local variables.
   Span<const std::pair<uint32_t, ValType>> getLocals() const noexcept {
@@ -130,7 +142,7 @@ private:
   /// \name Data of function instance.
   /// @{
   const ModuleInstance *ModInst;
-  const AST::FunctionType &FuncType;
+  const AST::SubType &SType;
   std::variant<WasmFunction, Symbol<CompiledFunction>,
                std::unique_ptr<HostFunctionBase>>
       Data;

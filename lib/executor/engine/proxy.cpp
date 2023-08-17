@@ -138,15 +138,13 @@ Expect<void *> Executor::tableGetFuncSymbol(Runtime::StackManager &StackMgr,
 
   const auto *ModInst = StackMgr.getModule();
   assuming(ModInst);
-  const auto TargetFuncType = ModInst->getFuncType(FuncTypeIdx);
-  assuming(TargetFuncType && *TargetFuncType);
+  const auto &ExpDefType = **ModInst->getType(FuncTypeIdx);
   const auto *FuncInst = retrieveFuncRef(*Ref);
   assuming(FuncInst);
-  const auto &FuncType = FuncInst->getFuncType();
-  if (!matchTypes(*ModInst, (*TargetFuncType)->getParamTypes(),
-                  *FuncInst->getModule(), FuncType.getParamTypes()) ||
-      !matchTypes(*ModInst, (*TargetFuncType)->getReturnTypes(),
-                  *FuncInst->getModule(), FuncType.getReturnTypes())) {
+  const auto &GotDefType = FuncInst->getDefType();
+  if (!AST::TypeMatcher::matchType(
+          ModInst->getTypeList(), *ExpDefType.getTypeIndex(),
+          FuncInst->getModule()->getTypeList(), *GotDefType.getTypeIndex())) {
     return Unexpect(ErrCode::Value::IndirectCallTypeMismatch);
   }
 
@@ -176,15 +174,17 @@ Executor::callIndirect(Runtime::StackManager &StackMgr, const uint32_t TableIdx,
 
   const auto *ModInst = StackMgr.getModule();
   assuming(ModInst);
-  const auto TargetFuncType = ModInst->getFuncType(FuncTypeIdx);
-  assuming(TargetFuncType && *TargetFuncType);
+  const auto &ExpDefType = **ModInst->getType(FuncTypeIdx);
   const auto *FuncInst = retrieveFuncRef(*Ref);
   assuming(FuncInst);
-  const auto &FuncType = FuncInst->getFuncType();
-  if (unlikely(**TargetFuncType != FuncType)) {
+  const auto &GotDefType = FuncInst->getDefType();
+  if (!AST::TypeMatcher::matchType(
+          ModInst->getTypeList(), *ExpDefType.getTypeIndex(),
+          FuncInst->getModule()->getTypeList(), *GotDefType.getTypeIndex())) {
     return Unexpect(ErrCode::Value::IndirectCallTypeMismatch);
   }
 
+  const auto &FuncType = GotDefType.getCompositeType().getFuncType();
   const uint32_t ParamsSize =
       static_cast<uint32_t>(FuncType.getParamTypes().size());
   const uint32_t ReturnsSize =

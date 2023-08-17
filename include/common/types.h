@@ -207,11 +207,13 @@ public:
 
   bool isFuncRefType() const noexcept {
     return (Inner.Data.HTCode == TypeCode::FuncRef) ||
+           (Inner.Data.HTCode == TypeCode::NullFuncRef) ||
            (Inner.Data.HTCode == TypeCode::TypeIndex);
   }
 
   bool isExternRefType() const noexcept {
-    return (Inner.Data.HTCode == TypeCode::ExternRef);
+    return (Inner.Data.HTCode == TypeCode::ExternRef) ||
+           (Inner.Data.HTCode == TypeCode::NullExternRef);
   }
 
   bool isNullableRefType() const noexcept {
@@ -236,7 +238,36 @@ public:
     }
   }
 
-protected:
+  uint32_t getBitWidth() const noexcept {
+    switch (Inner.Data.Code) {
+    case TypeCode::I8:
+      return 8U;
+    case TypeCode::I16:
+      return 16U;
+    case TypeCode::I32:
+    case TypeCode::F32:
+      return 32U;
+    case TypeCode::I64:
+    case TypeCode::F64:
+      return 64U;
+    case TypeCode::V128:
+      return 128U;
+    default:
+      // Bit width not available for reftypes.
+      assumingUnreachable();
+    }
+  }
+
+  ValType toNullableRef() const noexcept {
+    assuming(isRefType());
+    return ValType(TypeCode::RefNull, Inner.Data.HTCode, Inner.Data.Idx);
+  }
+  ValType toNonNullableRef() const noexcept {
+    assuming(isRefType());
+    return ValType(TypeCode::Ref, Inner.Data.HTCode, Inner.Data.Idx);
+  }
+
+private:
   union {
     uint8_t Raw[8];
     struct {
@@ -303,6 +334,8 @@ private:
 /// FuncRef definition.
 namespace Runtime::Instance {
 class FunctionInstance;
+class StructInstance;
+class ArrayInstance;
 } // namespace Runtime::Instance
 
 /// NumType and RefType variant definitions.
@@ -322,6 +355,16 @@ struct RefVariant {
       : Type(TypeCode::FuncRef),
         Ptr(reinterpret_cast<void *>(
             const_cast<Runtime::Instance::FunctionInstance *>(P))) {}
+  template <>
+  RefVariant(const Runtime::Instance::StructInstance *P) noexcept
+      : Type(TypeCode::StructRef),
+        Ptr(reinterpret_cast<void *>(
+            const_cast<Runtime::Instance::StructInstance *>(P))) {}
+  template <>
+  RefVariant(const Runtime::Instance::ArrayInstance *P) noexcept
+      : Type(TypeCode::ArrayRef),
+        Ptr(reinterpret_cast<void *>(
+            const_cast<Runtime::Instance::ArrayInstance *>(P))) {}
 
   template <typename T>
   RefVariant(T *P) noexcept
@@ -329,6 +372,12 @@ struct RefVariant {
   template <>
   RefVariant(Runtime::Instance::FunctionInstance *P) noexcept
       : Type(TypeCode::FuncRef), Ptr(reinterpret_cast<void *>(P)) {}
+  template <>
+  RefVariant(Runtime::Instance::StructInstance *P) noexcept
+      : Type(TypeCode::StructRef), Ptr(reinterpret_cast<void *>(P)) {}
+  template <>
+  RefVariant(Runtime::Instance::ArrayInstance *P) noexcept
+      : Type(TypeCode::ArrayRef), Ptr(reinterpret_cast<void *>(P)) {}
 
   // Check is null.
   bool isNull() const { return Ptr == nullptr; }

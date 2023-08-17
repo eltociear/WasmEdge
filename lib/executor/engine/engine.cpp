@@ -85,6 +85,16 @@ Expect<void> Executor::execute(Runtime::StackManager &StackMgr,
 
   auto Dispatch = [this, &PC, &StackMgr]() -> Expect<void> {
     const AST::Instruction &Instr = *PC;
+
+    auto getDstCompType = [&StackMgr, &Instr, this]() {
+      return getDefTypeByIdx(StackMgr, Instr.getTargetIndex())
+          ->getCompositeType();
+    };
+    auto getSrcCompType = [&StackMgr, &Instr, this]() {
+      return getDefTypeByIdx(StackMgr, Instr.getSourceIndex())
+          ->getCompositeType();
+    };
+
     switch (Instr.getOpCode()) {
     // Control instructions.
     case OpCode::Unreachable:
@@ -131,6 +141,12 @@ Expect<void> Executor::execute(Runtime::StackManager &StackMgr,
       return runBrOnNull(StackMgr, Instr, PC);
     case OpCode::Br_on_non_null:
       return runBrOnNonNull(StackMgr, Instr, PC);
+      /*
+    case OpCode::Br_on_cast:
+      return runBrCastOp(StackMgr, Instr, PC, false, false);
+    case OpCode::Br_on_cast_fail:
+      return runBrCastOp(StackMgr, Instr, PC, true, false);
+      */
     case OpCode::Return:
       return runReturnOp(StackMgr, PC);
     case OpCode::Call:
@@ -148,31 +164,109 @@ Expect<void> Executor::execute(Runtime::StackManager &StackMgr,
 
     // Reference Instructions
     case OpCode::Ref__null:
-      StackMgr.push(RefVariant(Instr.getValType()));
-      return {};
-    case OpCode::Ref__is_null: {
-      ValVariant &Val = StackMgr.getTop();
-      if (Val.get<RefVariant>().isNull()) {
-        Val.emplace<uint32_t>(UINT32_C(1));
-      } else {
-        Val.emplace<uint32_t>(UINT32_C(0));
-      }
-      return {};
-    }
-    case OpCode::Ref__func: {
-      const auto *ModInst = StackMgr.getModule();
-      const auto *FuncInst = *ModInst->getFunc(Instr.getTargetIndex());
-      StackMgr.push(RefVariant(FuncInst));
-      return {};
+      return runRefNullOp(StackMgr, Instr.getValType());
+    case OpCode::Ref__is_null:
+      return runRefIsNullOp(StackMgr.getTop());
+    case OpCode::Ref__func:
+      return runRefFuncOp(StackMgr, Instr.getTargetIndex());
+    case OpCode::Ref__eq: {
+      ValVariant Rhs = StackMgr.pop();
+      return runRefEqOp(StackMgr.getTop(), Rhs);
     }
     case OpCode::Ref__as_non_null:
-      if (StackMgr.getTop().get<RefVariant>().isNull()) {
-        spdlog::error(ErrCode::Value::CastNullToNonNull);
-        spdlog::error(
-            ErrInfo::InfoInstruction(Instr.getOpCode(), Instr.getOffset()));
-        return Unexpect(ErrCode::Value::CastNullToNonNull);
-      }
-      return {};
+      return runRefAsNonNullOp(StackMgr.getTop().get<RefVariant>(), Instr);
+
+      // GC Instructions
+    case OpCode::Struct__new:
+      return runStructNewOp(StackMgr, getDstCompType());
+    case OpCode::Struct__new_default:
+      return runStructNewOp(StackMgr, getDstCompType(), true);
+    case OpCode::Struct__get:
+    case OpCode::Struct__get_u:
+      return runStructGetOp(StackMgr.getTop(), Instr.getSourceIndex(),
+                            getDstCompType(), Instr);
+    case OpCode::Struct__get_s:
+      return runStructGetOp(StackMgr.getTop(), Instr.getSourceIndex(),
+                            getDstCompType(), Instr, true);
+    case OpCode::Struct__set:
+      return runStructSetOp(StackMgr.pop(), StackMgr.pop().get<RefVariant>(),
+                            getDstCompType(), Instr.getSourceIndex(), Instr);
+    case OpCode::Array__new:
+      return runArrayNewOp(StackMgr, getDstCompType(), 1,
+                           StackMgr.pop().get<uint32_t>());
+    case OpCode::Array__new_default:
+      return runArrayNewOp(StackMgr, getDstCompType(), 0,
+                           StackMgr.pop().get<uint32_t>());
+    case OpCode::Array__new_fixed:
+      return runArrayNewOp(StackMgr, getDstCompType(), Instr.getSourceIndex(),
+                           Instr.getSourceIndex());
+    case OpCode::Array__new_data:
+      return runArrayNewDataOp(
+          StackMgr.pop().get<uint32_t>(), StackMgr.getTop(), getDstCompType(),
+          *getDataInstByIdx(StackMgr, Instr.getSourceIndex()), Instr);
+    case OpCode::Array__new_elem:
+      return runArrayNewElemOp(
+          StackMgr.pop().get<uint32_t>(), StackMgr.getTop(), getDstCompType(),
+          *getElemInstByIdx(StackMgr, Instr.getSourceIndex()), Instr);
+    case OpCode::Array__get:
+    case OpCode::Array__get_u: {
+      const uint32_t Idx = StackMgr.pop().get<uint32_t>();
+      return runArrayGetOp(StackMgr.getTop(), Idx, getDstCompType(), Instr);
+    }
+    case OpCode::Array__get_s: {
+      const uint32_t Idx = StackMgr.pop().get<uint32_t>();
+      return runArrayGetOp(StackMgr.getTop(), Idx, getDstCompType(), Instr,
+                           true);
+    }
+    case OpCode::Array__set:
+      return runArraySetOp(StackMgr.pop(), StackMgr.pop().get<uint32_t>(),
+                           StackMgr.pop().get<RefVariant>(), getDstCompType(),
+                           Instr);
+    case OpCode::Array__len:
+      return runArrayLenOp(StackMgr.getTop(), Instr);
+    case OpCode::Array__fill:
+      return runArrayFillOp(StackMgr.pop().get<uint32_t>(), StackMgr.pop(),
+                            StackMgr.pop().get<uint32_t>(),
+                            StackMgr.pop().get<RefVariant>(), getDstCompType(),
+                            Instr);
+    case OpCode::Array__copy:
+      return runArrayCopyOp(
+          StackMgr.pop().get<uint32_t>(), StackMgr.pop().get<uint32_t>(),
+          StackMgr.pop().get<RefVariant>(), StackMgr.pop().get<uint32_t>(),
+          StackMgr.pop().get<RefVariant>(), getSrcCompType(), getDstCompType(),
+          Instr);
+    case OpCode::Array__init_data:
+      return runArrayInitDataOp(
+          StackMgr.pop().get<uint32_t>(), StackMgr.pop().get<uint32_t>(),
+          StackMgr.pop().get<uint32_t>(), StackMgr.pop().get<RefVariant>(),
+          getDstCompType(), *getDataInstByIdx(StackMgr, Instr.getSourceIndex()),
+          Instr);
+    case OpCode::Array__init_elem:
+      return runArrayInitElemOp(
+          StackMgr.pop().get<uint32_t>(), StackMgr.pop().get<uint32_t>(),
+          StackMgr.pop().get<uint32_t>(), StackMgr.pop().get<RefVariant>(),
+          getDstCompType(), *getElemInstByIdx(StackMgr, Instr.getSourceIndex()),
+          Instr);
+    case OpCode::Ref__test:
+    case OpCode::Ref__test_null:
+      return runRefTestOp(StackMgr.getModule()->getTypeList(),
+                          StackMgr.getTop(), Instr);
+    case OpCode::Ref__cast:
+    case OpCode::Ref__cast_null:
+      return runRefTestOp(StackMgr.getModule()->getTypeList(),
+                          StackMgr.getTop(), Instr, true);
+    case OpCode::Any__convert_extern:
+      return runRefConvOp(StackMgr.getTop().get<RefVariant>(),
+                          TypeCode::AnyRef);
+    case OpCode::Extern__convert_any:
+      return runRefConvOp(StackMgr.getTop().get<RefVariant>(),
+                          TypeCode::ExternRef);
+    case OpCode::Ref__i31:
+      return runRefI31Op(StackMgr.getTop());
+    case OpCode::I31__get_s:
+      return runI31GetOp(StackMgr.getTop(), Instr, true);
+    case OpCode::I31__get_u:
+      return runI31GetOp(StackMgr.getTop(), Instr);
 
     // Parametric Instructions
     case OpCode::Drop:
