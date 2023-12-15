@@ -303,21 +303,50 @@ private:
 /// FuncRef definition.
 namespace Runtime::Instance {
 class FunctionInstance;
-}
+} // namespace Runtime::Instance
 
 /// NumType and RefType variant definitions.
 struct RefVariant {
+  // Constructors.
+  RefVariant() noexcept : Type(TypeCode::ExternRef), Ptr(nullptr) {}
+  RefVariant(const ValType &VT) noexcept : Type(VT), Ptr(nullptr) {}
+  RefVariant(const ValType &VT, const RefVariant &Val) noexcept
+      : Type(VT), Ptr(Val.Ptr) {}
+
+  template <typename T>
+  RefVariant(const T *P) noexcept
+      : Type(TypeCode::ExternRef),
+        Ptr(reinterpret_cast<void *>(const_cast<T *>(P))) {}
+  template <>
+  RefVariant(const Runtime::Instance::FunctionInstance *P) noexcept
+      : Type(TypeCode::FuncRef),
+        Ptr(reinterpret_cast<void *>(
+            const_cast<Runtime::Instance::FunctionInstance *>(P))) {}
+
+  template <typename T>
+  RefVariant(T *P) noexcept
+      : Type(TypeCode::ExternRef), Ptr(reinterpret_cast<void *>(P)) {}
+  template <>
+  RefVariant(Runtime::Instance::FunctionInstance *P) noexcept
+      : Type(TypeCode::FuncRef), Ptr(reinterpret_cast<void *>(P)) {}
+
+  // Check is null.
+  bool isNull() const { return Ptr == nullptr; }
+
+  // Getter of type.
+  const ValType &getType() const noexcept { return Type; }
+
+  // Getter of pointer.
+  template <typename T> T *asPtr() const noexcept {
+    return reinterpret_cast<T *>(Ptr);
+  }
+
+  // Member data.
+  ValType Type;
 #if __INTPTR_WIDTH__ == 32
   uint32_t Padding = -1;
 #endif
-  void *Ptr = nullptr;
-  RefVariant() = default;
-  template <typename T>
-  RefVariant(const T *P) : Ptr(reinterpret_cast<void *>(const_cast<T *>(P))) {}
-  template <typename T> RefVariant(T *P) : Ptr(reinterpret_cast<void *>(P)) {}
-  bool isNull() const { return Ptr == nullptr; }
-
-  template <typename T> T *asPtr() const { return reinterpret_cast<T *>(Ptr); }
+  void *Ptr;
 };
 
 using ValVariant =
@@ -469,11 +498,9 @@ inline ValVariant ValueFromType(ValType Type) noexcept {
     return double(0.0);
   case TypeCode::V128:
     return uint128_t(0U);
-  case TypeCode::FuncRef:
-  case TypeCode::ExternRef:
   case TypeCode::Ref:
   case TypeCode::RefNull:
-    return RefVariant();
+    return RefVariant(Type);
   default:
     assumingUnreachable();
   }
