@@ -9,6 +9,14 @@
 namespace WasmEdge {
 namespace Executor {
 
+Expect<std::unique_ptr<Runtime::Instance::ComponentInstance>>
+instantiateComponent(Runtime::StoreManager &StoreMgr,
+                     const AST::Component::Component &Comp) {
+  // TODO: complete instantiate
+
+  return {};
+}
+
 /// Instantiate a WASM Module. See "include/executor/executor.h".
 Expect<std::unique_ptr<Runtime::Instance::ModuleInstance>>
 Executor::instantiateModule(Runtime::StoreManager &StoreMgr,

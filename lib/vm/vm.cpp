@@ -336,11 +336,10 @@ Expect<void> VM::unsafeLoadWasm(const std::filesystem::path &Path) {
   // If not load successfully, the previous status will be reserved.
   if (auto Res = LoaderEngine.parseWasmUnit(Path)) {
     if (std::holds_alternative<AST::Module>(*Res)) {
-      Mod = std::make_unique<AST::Module>(std::get<AST::Module>(*Res));
-    } else if (std::holds_alternative<AST::Component::Component>(*Res)) {
-      spdlog::error("component execution is not done yet.");
+      Unit.emplace<AST::Module>(std::get<AST::Module>(*Res));
     } else {
-      return Unexpect(Res);
+      Unit.emplace<AST::Component::Component>(
+          std::get<AST::Component::Component>(*Res));
     }
     Stage = VMStage::Loaded;
   } else {
@@ -353,11 +352,10 @@ Expect<void> VM::unsafeLoadWasm(Span<const Byte> Code) {
   // If not load successfully, the previous status will be reserved.
   if (auto Res = LoaderEngine.parseWasmUnit(Code)) {
     if (std::holds_alternative<AST::Module>(*Res)) {
-      Mod = std::make_unique<AST::Module>(std::get<AST::Module>(*Res));
-    } else if (std::holds_alternative<AST::Component::Component>(*Res)) {
-      spdlog::error("component execution is not done yet.");
+      Unit.emplace<AST::Module>(std::get<AST::Module>(*Res));
     } else {
-      return Unexpect(Res);
+      Unit.emplace<AST::Component::Component>(
+          std::get<AST::Component::Component>(*Res));
     }
     Stage = VMStage::Loaded;
   } else {
@@ -367,7 +365,7 @@ Expect<void> VM::unsafeLoadWasm(Span<const Byte> Code) {
 }
 
 Expect<void> VM::unsafeLoadWasm(const AST::Module &Module) {
-  Mod = std::make_unique<AST::Module>(Module);
+  Unit.emplace<AST::Module>(Module);
   Stage = VMStage::Loaded;
   return {};
 }
@@ -378,11 +376,22 @@ Expect<void> VM::unsafeValidate() {
     spdlog::error(ErrCode::Value::WrongVMWorkflow);
     return Unexpect(ErrCode::Value::WrongVMWorkflow);
   }
-  if (auto Res = ValidatorEngine.validate(*Mod.get())) {
-    Stage = VMStage::Validated;
-    return {};
+
+  if (std::holds_alternative<AST::Module>(Unit)) {
+    if (auto Res = ValidatorEngine.validate(std::get<AST::Module>(Unit))) {
+      Stage = VMStage::Validated;
+      return {};
+    } else {
+      return Unexpect(Res);
+    }
   } else {
-    return Unexpect(Res);
+    if (auto Res = ValidatorEngine.validate(
+            std::get<AST::Component::Component>(Unit))) {
+      Stage = VMStage::Validated;
+      return {};
+    } else {
+      return Unexpect(Res);
+    }
   }
 }
 
@@ -392,12 +401,24 @@ Expect<void> VM::unsafeInstantiate() {
     spdlog::error(ErrCode::Value::WrongVMWorkflow);
     return Unexpect(ErrCode::Value::WrongVMWorkflow);
   }
-  if (auto Res = ExecutorEngine.instantiateModule(StoreRef, *Mod.get())) {
-    Stage = VMStage::Instantiated;
-    ActiveModInst = std::move(*Res);
-    return {};
+  if (std::holds_alternative<AST::Module>(Unit)) {
+    if (auto Res = ExecutorEngine.instantiateModule(
+            StoreRef, std::get<AST::Module>(Unit))) {
+      Stage = VMStage::Instantiated;
+      ActiveModInst = std::move(*Res);
+      return {};
+    } else {
+      return Unexpect(Res);
+    }
   } else {
-    return Unexpect(Res);
+    if (auto Res = ExecutorEngine.instantiateComponent(
+            StoreRef, std::get<AST::Component::Component>(Unit))) {
+      Stage = VMStage::Instantiated;
+      // TODO: add Active component instance concept
+      return {};
+    } else {
+      return Unexpect(Res);
+    }
   }
 }
 
@@ -477,7 +498,6 @@ VM::asyncExecute(std::string_view ModName, std::string_view Func,
 }
 
 void VM::unsafeCleanup() {
-  Mod.reset();
   ActiveModInst.reset();
   StoreRef.reset();
   RegModInsts.clear();

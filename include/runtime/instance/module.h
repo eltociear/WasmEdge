@@ -63,6 +63,8 @@ inline constexpr const bool IsInstanceV =
     std::is_same_v<T, Instance::DataInstance>;
 } // namespace
 
+class ComponentInstance {};
+
 class ModuleInstance {
 public:
   ModuleInstance(std::string_view Name, void *Data = nullptr,

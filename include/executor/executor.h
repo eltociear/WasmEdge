@@ -152,6 +152,10 @@ public:
   Expect<std::unique_ptr<Runtime::Instance::ModuleInstance>>
   instantiateModule(Runtime::StoreManager &StoreMgr, const AST::Module &Mod);
 
+  Expect<std::unique_ptr<Runtime::Instance::ComponentInstance>>
+  instantiateComponent(Runtime::StoreManager &StoreMgr,
+                       const AST::Component::Component &Comp);
+
   /// Instantiate and register a WASM module into a named module instance.
   Expect<std::unique_ptr<Runtime::Instance::ModuleInstance>>
   registerModule(Runtime::StoreManager &StoreMgr, const AST::Module &Mod,
